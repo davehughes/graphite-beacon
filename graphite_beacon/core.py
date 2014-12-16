@@ -2,6 +2,7 @@ import os
 from re import compile as re, M
 
 import json
+import yaml
 from tornado import ioloop, log
 
 from .alerts import BaseAlert
@@ -80,7 +81,7 @@ class Reactor(object):
             try:
                 with open(config) as fconfig:
                     source = COMMENT_RE.sub("", fconfig.read())
-                    config = json.loads(source)
+                    config = yaml.load(source)
                     alerts = self.options.get('alerts', [])
                     self.options.update(config)
                     self.options['alerts'] = alerts + self.options.get('alerts', [])
