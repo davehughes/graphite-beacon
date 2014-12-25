@@ -36,7 +36,7 @@ class HipChatHandler(AbstractHandler):
         message = self.get_short(level, *args, **kwargs)
 
         if level in self.notify_levels:
-            message = '@here ' + message
+            message += ' ' + ' '.join('@' + name for name in self.notify_levels[level])
 
         data = {
             'room_id': self.room,
