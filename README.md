@@ -10,7 +10,7 @@ Features:
 - Simplest installation (one python package dependency);
 - No software dependencies (Databases, AMQP and etc);
 - Light and full asyncronous;
-- SMTP, Hipchat handlers (Please make a request for additional handlers);
+- SMTP, Hipchat, Slack, HTTP handlers (Please make a request for additional handlers);
 - Easy configurable and support "historical values"
 
 [![Build status](http://img.shields.io/travis/klen/graphite-beacon.svg?style=flat-square)](http://travis-ci.org/klen/graphite-beacon)
@@ -43,16 +43,9 @@ Example:
 Requirements
 ------------
 
-- python (2.7, 3.3, 3.4)
+- python (2.6, 2.7, 3.3, 3.4)
 - tornado
 
-Run with Docker
-----------------
-
-Build a config.json file and run :
-
-    docker run -v /path/to/config.json:/config.json deliverous/graphite-beacon
-   
 
 Installation
 ------------
@@ -65,9 +58,9 @@ Installation
 
 ### Debian package
 
-Using the command line, add the following to your /etc/apt/sources.list system config file: 
+Using the command line, add the following to your /etc/apt/sources.list system config file:
 
-    echo "deb http://dl.bintray.com/klen/deb /" | sudo tee -a /etc/apt/sources.list 
+    echo "deb http://dl.bintray.com/klen/deb /" | sudo tee -a /etc/apt/sources.list
     echo "deb-src http://dl.bintray.com/klen/deb /" | sudo tee -a /etc/apt/sources.list
 
 Install the package using apt-get:
@@ -81,7 +74,7 @@ There is an ansible role to install the package: https://github.com/Stouts/Stout
 
 ## Docker
 
-To run this Docker container just run:
+Build a config.json file and run :
 
     docker run -v /path/to/config.json:/config.json deliverous/graphite-beacon
 
@@ -149,6 +142,10 @@ Value units:
         // Can be redfined for each alert.
         "interval": "10minute",
 
+        // Default time window for Graphite queries
+        // Defaults to query interval, can be redefined for each alert.
+        "time_window": "10minute",
+
         // Notification repeat interval
         // If an alert is failed, its notification will be repeated with the interval below
         "repeat_interval": "2hour",
@@ -163,7 +160,7 @@ Value units:
         // Default prefix (used for notifications)
         "prefix": "[BEACON]",
 
-        // Default handlers (log, smtp, hipchat, http)
+        // Default handlers (log, smtp, hipchat, http, slack)
         "critical_handlers": ["log", "smtp"],
         "warning_handlers": ["log", "smtp"],
         "normal_handlers": ["log", "smtp"],
@@ -243,7 +240,7 @@ Graphite-beacon keeps history of values for each target in metric. Historical va
 is average of values from history. "Historical" rule becames work when it has enough
 values (Read about history size bellow).
 
-History size is equal 60 by default. You can change it by using Reactor option
+History values are keeping 1 day by default. You can change it by using Reactor option
 'history_size'.
 
 By example, send warning when today' new user is less than 80% of average for last 10 days:
@@ -258,7 +255,7 @@ alerts: [
   "interval": "1day",
   "query": "Your graphite query here",
   // Get average for last 10 days
-  "history_size": 10,
+  "history_size": 10day,
   "rules": [
     // Warning if today's new user less than 80% of average for 10 days
     "warning: < historical * 0.8",
@@ -323,6 +320,9 @@ Enable "hipchat" handler and set the options in your beacon configuration.
 {
     ...
     "hipchat": {
+        // (optional) Custom HipChat URL
+        "url": 'https://api.custom.hipchat.my',
+
         "room": "myroom",
         "key": "mykey"
     }
@@ -346,6 +346,46 @@ Enable "http" handler and set the options in your beacon configuration.
         // (optional) HTTP method
         "method": "GET"
 
+    }
+    ...
+}
+```
+
+### Setup SlackHandler
+
+Enable "slack" handler and set the options in your beacon configuration.
+
+```js
+{
+    ...
+    "slack": {
+        "webhook": "http://myhook.com",
+        // optional
+        "channel": "#general",
+        // optional
+        "username": "graphite-beacon",
+    }
+    ...
+}
+```
+
+### Setup CliHandler
+
+Enable handler for running command line commands and set the options in your beacon configuration.
+
+```js
+{
+    ...
+    "cli": {
+        // Several variables that will be substituted by values are allowed in configuration
+        // ${level} -- alert level
+        // ${name} -- alert name
+        // ${value} -- current metrics value
+        // ${limit_value} -- metrics limit value
+        // required
+        "command": "./myscript ${level} ${name} ${value} ...",
+        // optional -- if present only alerts with specified names will trigger this handler. If not present, all alerts will trigger handler
+        "alerts_whitelist": ["..."]
     }
     ...
 }
@@ -393,7 +433,15 @@ Contributors
 
 * Kirill Klenov     (https://github.com/klen, horneds@gmail.com)
 
+* Andrej Kuročenko (https://github.com/kurochenko)
+* Cody Soyland (https://github.com/codysoyland)
+* George Ionita (https://github.com/georgeionita)
+* James Yuzawa (https://github.com/yuzawa-san)
+* Nick Pillitteri (https://github.com/56quarters)
+* Niku Toivola (https://github.com/nikut)
+* Raine Virta (https://github.com/raine)
 * Thomas Clavier (https://github.com/tclavier)
+* dugeem (https://github.com/dugeem)
 
 License
 --------

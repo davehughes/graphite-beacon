@@ -3,6 +3,7 @@ from re import compile as re, M
 
 import json
 import yaml
+import logging
 from tornado import ioloop, log
 
 from .alerts import BaseAlert
@@ -24,17 +25,18 @@ class Reactor(object):
         'auth_username': None,
         'config': 'config.json',
         'critical_handlers': ['log', 'smtp'],
-        'format': 'short',
         'debug': False,
+        'format': 'short',
         'graphite_url': 'http://localhost',
+        'history_size': '1day',
         'interval': '10minute',
-        'history_size': 60,
-        'repeat_interval': '2hour',
         'logging': 'info',
         'method': 'average',
         'normal_handlers': ['log', 'smtp'],
         'pidfile': None,
         'prefix': '[BEACON]',
+        'repeat_interval': '2hour',
+        'request_timeout': 20.0,
         'send_initial': False,
         'warning_handlers': ['log', 'smtp'],
     }
@@ -56,7 +58,7 @@ class Reactor(object):
         for config in self.options.pop('include', []):
             self.include_config(config)
 
-        LOGGER.setLevel(self.options.get('logging', 'info').upper())
+        LOGGER.setLevel(_get_numeric_log_level(self.options.get('logging', 'info')))
         registry.clean()
 
         self.handlers = {'warning': set(), 'critical': set(), 'normal': set()}
@@ -82,9 +84,7 @@ class Reactor(object):
                 with open(config) as fconfig:
                     source = COMMENT_RE.sub("", fconfig.read())
                     config = yaml.load(source)
-                    alerts = self.options.get('alerts', [])
                     self.options.update(config)
-                    self.options['alerts'] = alerts + self.options.get('alerts', [])
             except (IOError, ValueError):
                 LOGGER.error('Invalid config file: %s' % config)
 
@@ -125,3 +125,33 @@ class Reactor(object):
 
         for handler in self.handlers.get(level, []):
             handler.notify(level, alert, value, target=target, ntype=ntype, rule=rule)
+
+
+_LOG_LEVELS = {
+    'DEBUG': logging.DEBUG,
+    'INFO': logging.INFO,
+    'WARN': logging.WARN,
+    'WARNING': logging.WARNING,
+    'ERROR': logging.ERROR,
+    'CRITICAL': logging.CRITICAL
+}
+
+
+def _get_numeric_log_level(level):
+    """Convert a textual log level to the numeric constants expected by the
+    :meth:`logging.Logger.setLevel` method.
+
+    This is required for compatibility with Python 2.6 where there is no conversion
+    performed by the ``setLevel`` method. In Python 2.7 textual names are converted
+    to numeric constants automatically.
+
+    :param basestring name: Textual log level name
+    :return: Numeric log level constant
+    :rtype: int
+    """
+    if not isinstance(level, int):
+        try:
+            return _LOG_LEVELS[str(level).upper()]
+        except KeyError:
+            raise ValueError("Unknown log level: %s" % level)
+    return level

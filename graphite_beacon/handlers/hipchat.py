@@ -1,4 +1,4 @@
-import urllib
+import json
 from tornado import gen, httpclient as hc
 
 from . import AbstractHandler, LOGGER
@@ -10,6 +10,7 @@ class HipChatHandler(AbstractHandler):
 
     # Default options
     defaults = {
+        'url': 'https://api.hipchat.com',
         'room': None,
         'key': None,
     }
@@ -33,27 +34,13 @@ class HipChatHandler(AbstractHandler):
     def notify(self, level, *args, **kwargs):
         LOGGER.debug("Handler (%s) %s", self.name, level)
 
-        message = self.get_short(level, *args, **kwargs)
-
-        if level in self.notify_levels:
-            message += ' ' + ' '.join('@' + name for name in self.notify_levels[level])
-
         data = {
-            'room_id': self.room,
-            'from': self.author,
-            'message': message,
-            'notify': 1,
-            'color': self.colors.get(level, 'blue'),
+            'message': self.get_short(level, *args, **kwargs).decode('UTF-8'),
+            'notify': True,
+            'color': self.colors.get(level, 'gray'),
             'message_format': 'text',
         }
-        body = urllib.urlencode(data)
 
-        url = 'https://api.hipchat.com/v1/rooms/message?auth_token=' + self.key
-
-        LOGGER.debug("Request %s %s", url, body)
-
-        yield self.client.fetch(
-            url,
-            method='POST', body=body,
-            headers={'Content-Type': 'application/x-www-form-urlencoded'}
-        )
+        yield self.client.fetch('{url}/v2/room/{room}/notification?auth_token={token}'.format(
+            url=self.options.url, room=self.room, token=self.key),
+            headers={'Content-Type': 'application/json'}, method='POST', body=json.dumps(data))
