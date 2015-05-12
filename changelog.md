@@ -1,3 +1,14 @@
+## 0.23.0
+- Support systemd
+- Update CLI handler
+- Add PagerDuty handler
+
+## 0.20.0
+
+- Add Slack (https://slack.com) handler
+- Add `request_timeout` alerts' option
+- Change history_size format: 144 -> 1day
+
 ## 0.18.0
 
 - Python 2.6 support

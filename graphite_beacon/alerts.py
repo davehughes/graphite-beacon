@@ -2,13 +2,14 @@ from tornado import ioloop, httpclient as hc, gen, log, escape
 
 from . import _compat as _
 from .graphite import GraphiteRecord
-from .utils import convert_to_format, parse_interval, interval_to_graphite, parse_rule, HISTORICAL
+from .utils import convert_to_format, parse_interval, parse_rule, HISTORICAL, interval_to_graphite
+import math
 from collections import deque, defaultdict
 from itertools import islice
 
 
 LOGGER = log.gen_log
-METHODS = "average", "last_value"
+METHODS = "average", "last_value", "sum"
 LEVELS = {
     'critical': 0,
     'warning': 10,
@@ -62,7 +63,6 @@ class BaseAlert(_.with_metaclass(AlertFabric)):
 
         self.waiting = False
         self.state = {None: "normal", "waiting": "normal", "loading": "normal"}
-        self.history_size = options.get('history_size', self.reactor.options['history_size'])
         self.history = defaultdict(lambda: sliceable_deque([], self.history_size))
 
         LOGGER.info("Alert '%s': has inited" % self)
@@ -79,18 +79,33 @@ class BaseAlert(_.with_metaclass(AlertFabric)):
     def configure(self, name=None, rules=None, query=None, **options):
         assert name, "Alert's name is invalid"
         self.name = name
+
         assert rules, "%s: Alert's rules is invalid" % name
         self.rules = [parse_rule(rule) for rule in rules]
         self.rules = list(sorted(self.rules, key=lambda r: LEVELS.get(r.get('level'), 99)))
+
         assert query, "%s: Alert's query is invalid" % self.name
         self.query = query
-        self.interval = interval_to_graphite(options.get('interval',
-                                                         self.reactor.options['interval']))
+
+        self.interval = interval_to_graphite(
+            options.get('interval', self.reactor.options['interval']))
+        interval = parse_interval(self.interval)
+
+        self.time_window = interval_to_graphite(
+            options.get('time_window', options.get('interval', self.reactor.options['interval'])))
+
+        self._format = options.get('format', self.reactor.options['format'])
+        self.request_timeout = options.get(
+            'request_timeout', self.reactor.options['request_timeout'])
+
+        self.history_size = options.get('history_size', self.reactor.options['history_size'])
+        self.history_size = parse_interval(self.history_size)
+        self.history_size = int(math.ceil(self.history_size / interval))
+
         if self.reactor.options.get('debug'):
             self.callback = ioloop.PeriodicCallback(self.load, 5000)
         else:
-            self.callback = ioloop.PeriodicCallback(self.load, parse_interval(self.interval))
-        self._format = options.get('format', self.reactor.options['format'])
+            self.callback = ioloop.PeriodicCallback(self.load, interval)
 
     def convert(self, value):
         return convert_to_format(value, self._format)
@@ -116,6 +131,9 @@ class BaseAlert(_.with_metaclass(AlertFabric)):
     def check(self, records):
         for value, target in records:
             LOGGER.info("%s [%s]: %s", self.name, target, value)
+            if value is None:
+                self.notify('critical', value, target)
+                continue
             for rule in self.rules:
                 rvalue = self.get_value_for_rule(rule, target)
                 if rvalue is None:
@@ -132,7 +150,7 @@ class BaseAlert(_.with_metaclass(AlertFabric)):
         rvalue = rule['value']
         if rvalue == HISTORICAL:
             history = self.history[target]
-            if len(history) < self.reactor.options['history_size']:
+            if len(history) < self.history_size:
                 return None
             rvalue = sum(history) / len(history)
 
@@ -168,10 +186,14 @@ class GraphiteAlert(BaseAlert):
         self.method = options.get('method', self.reactor.options['method'])
         assert self.method in METHODS, "Method is invalid"
 
+        self.auth_username = self.reactor.options.get('auth_username')
+        self.auth_password = self.reactor.options.get('auth_password')
+
         query = escape.url_escape(self.query)
-        self.url = "%(base)s/render/?target=%(query)s&rawData=true&from=-%(interval)s" % {
+        self.url = "%(base)s/render/?target=%(query)s&rawData=true&from=-%(time_window)s" % {
             'base': self.reactor.options['graphite_url'], 'query': query,
-            'interval': self.interval}
+            'time_window': self.time_window}
+        LOGGER.debug('%s: url = %s' % (self.name, self.url))
 
     @gen.coroutine
     def load(self):
@@ -181,13 +203,14 @@ class GraphiteAlert(BaseAlert):
         else:
             self.waiting = True
             try:
-                response = yield self.client.fetch(
-                    self.url,
-                    auth_username=self.reactor.options.get('auth_username'),
-                    auth_password=self.reactor.options.get('auth_password'),
-                )
-                records = (GraphiteRecord(line) for line in response.buffer)
-                self.check([(getattr(record, self.method), record.target) for record in records])
+                response = yield self.client.fetch(self.url, auth_username=self.auth_username,
+                                                   auth_password=self.auth_password,
+                                                   request_timeout=self.request_timeout)
+                records = (GraphiteRecord(line.decode('utf-8')) for line in response.buffer)
+                data = [(None if record.empty else getattr(record, self.method), record.target) for record in records]
+                if len(data) == 0:
+                    raise ValueError('No data')
+                self.check(data)
                 self.notify('normal', 'Metrics are loaded', target='loading', ntype='common')
             except Exception as e:
                 self.notify('critical', 'Loading error: %s' % e, target='loading', ntype='common')
@@ -195,9 +218,9 @@ class GraphiteAlert(BaseAlert):
 
     def get_graph_url(self, target, graphite_url=None):
         query = escape.url_escape(target)
-        return "%(base)s/render/?target=%(query)s&from=-%(interval)s" % {
+        return "%(base)s/render/?target=%(query)s&from=-%(time_window)s" % {
             'base': graphite_url or self.reactor.options['graphite_url'], 'query': query,
-            'interval': self.interval}
+            'time_window': self.time_window}
 
 
 class URLAlert(BaseAlert):
@@ -212,10 +235,13 @@ class URLAlert(BaseAlert):
         else:
             self.waiting = True
             try:
-                response = yield self.client.fetch(
-                    self.query, method=self.options.get('method', 'GET'))
+                response = yield self.client.fetch(self.query,
+                                                   method=self.options.get('method', 'GET'),
+                                                   request_timeout=self.request_timeout)
                 self.check([(response.code, self.query)])
-                self.notify('normal', 'Metrics are loaded', target='loading', ntype='common')
+                self.notify('normal', 'Metrics are loaded', target='loading')
+
             except Exception as e:
-                self.notify('critical', 'Loading error: %s' % e, target='loading', ntype='common')
+                self.notify('critical', str(e), target='loading')
+
             self.waiting = False
