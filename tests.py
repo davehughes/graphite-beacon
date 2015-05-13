@@ -9,20 +9,69 @@ import mock
 def reactor():
     from graphite_beacon.core import Reactor
 
-    return Reactor(history_size='40m')
+    return Reactor(history_size='40m', config=None)
 
 
 def test_reactor():
     from graphite_beacon.core import Reactor
 
-    rr = Reactor()
+    rr = Reactor(config=None)
     assert rr
     assert rr.reinit()
 
-    rr = Reactor(include=['example-config.json'], alerts=[
-        {'name': 'test', 'query': '*', 'rules': ["normal: == 0"]}])
+    rr = Reactor(config=None,
+                 include=['example-config.json'],
+                 alerts=[{'name': 'test',
+                          'query': '*',
+                          'rules': ["normal: == 0"]}])
     assert rr.options['interval'] == '20minute'
-    assert len(rr.alerts) == 2
+    assert len(rr.alerts) == 3
+
+
+def test_reactor_with_yaml_config():
+    from graphite_beacon.core import Reactor
+
+    rr = Reactor(config='example-config.yaml')
+    assert rr
+    assert rr.reinit()
+    assert rr.options['interval'] == '20minute'
+
+
+def test_reactor_maintains_default_state():
+    from graphite_beacon.core import Reactor
+
+    rr = Reactor(config=None, interval='4minute')
+    assert rr
+    assert rr.reinit()
+    assert rr.options['interval'] == '4minute'
+    rr.reinit(interval='6minute')
+    assert rr.options['interval'] == '6minute'
+    rr.reinit()
+    assert rr.options['interval'] == '6minute'
+
+
+def test_reactor_errors_on_nonexistent_config():
+    from graphite_beacon.core import Reactor, InvalidConfigError
+
+    detected_bad_config = False
+    try:
+        rr = Reactor(config='nonexistent-config.json')
+    except InvalidConfigError as e:
+        detected_bad_config = True
+
+    assert detected_bad_config
+
+
+def test_reactor_errors_on_bad_config():
+    from graphite_beacon.core import Reactor, InvalidConfigError
+
+    detected_bad_config = False
+    try:
+        rr = Reactor(config='bad-config.json')
+    except InvalidConfigError as e:
+        detected_bad_config = True
+
+    assert detected_bad_config
 
 
 def test_convert_config_log_level():
