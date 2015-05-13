@@ -1,4 +1,5 @@
 import json
+import urllib
 from tornado import gen, httpclient as hc
 
 from . import AbstractHandler, LOGGER
@@ -52,14 +53,14 @@ class HipChatHandler(AbstractHandler):
                 'from': self.options.get('author', 'Graphite Beacon'),
             }
             url = '{url}/v1/rooms/message?auth_token={token}'.format(
-                    url=self.options.url,
+                    url=self.options['url'],
                     token=self.key,
                     )
             yield self.client.fetch(
                 url,
                 method='POST',
                 headers={'Content-Type': 'application/x-www-form-urlencoded'},
-                body=body,
+                body=urllib.urlencode(data),
             )
 
         elif self.api_version == 2:
@@ -70,7 +71,7 @@ class HipChatHandler(AbstractHandler):
                 'notify': True,
             }
             url = '{url}/v2/room/{room}/notification?auth_token={token}'.format(
-                    url=self.options.url,
+                    url=self.options['url'],
                     room=self.room,
                     token=self.key,
                     )
