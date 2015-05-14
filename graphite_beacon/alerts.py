@@ -17,6 +17,10 @@ LEVELS = {
 }
 
 
+class InvalidAlertConfigError(ValueError):
+    pass
+
+
 class sliceable_deque(deque):
 
     def __getitem__(self, index):
@@ -58,8 +62,12 @@ class BaseAlert(_.with_metaclass(AlertFabric)):
 
         try:
             self.configure(**options)
+        except InvalidAlertConfigError as e:
+            raise
         except Exception as e:
-            raise ValueError("Invalid alert configuration: %s" % e)
+            msg = "Invalid alert configuration for alert {}: {}".format(
+                  options.get('name', '<unknown>'), e)
+            raise ValueError(msg)
 
         self.waiting = False
         self.state = {None: "normal", "waiting": "normal", "loading": "normal"}
@@ -77,30 +85,45 @@ class BaseAlert(_.with_metaclass(AlertFabric)):
         return "%s (%s)" % (self.name, self.interval)
 
     def configure(self, name=None, rules=None, query=None, **options):
-        assert name, "Alert's name is invalid"
+        if not name:
+            raise InvalidAlertConfigError("Alert's name is invalid")
         self.name = name
 
-        assert rules, "%s: Alert's rules is invalid" % name
-        self.rules = [parse_rule(rule) for rule in rules]
+        if not rules:
+            raise InvalidAlertConfigError("%s: Alert's rules are null or empty" % name)
+        try:
+            self.rules = [parse_rule(rule) for rule in rules]
+        except ValueError:
+            raise InvalidAlertConfigError("%s: One or more alert rules are invalid" % name)
         self.rules = list(sorted(self.rules, key=lambda r: LEVELS.get(r.get('level'), 99)))
 
-        assert query, "%s: Alert's query is invalid" % self.name
+        if not query:
+            raise InvalidAlertConfigError("%s: Alert's query is invalid" % self.name)
         self.query = query
 
-        self.interval = interval_to_graphite(
-            options.get('interval', self.reactor.options['interval']))
-        interval = parse_interval(self.interval)
+        try:
+            self.interval = interval_to_graphite(
+                options.get('interval', self.reactor.options['interval']))
+            interval = parse_interval(self.interval)
+        except ValueError:
+            raise InvalidAlertConfigError("%s: Alert's interval is invalid" % name)
 
-        self.time_window = interval_to_graphite(
-            options.get('time_window', options.get('interval', self.reactor.options['interval'])))
+        try:
+            self.time_window = interval_to_graphite(
+                options.get('time_window', options.get('interval', self.reactor.options['interval'])))
+        except ValueError:
+            raise InvalidAlertConfigError("%s: Alert's time_window is invalid" % name)
 
         self._format = options.get('format', self.reactor.options['format'])
         self.request_timeout = options.get(
             'request_timeout', self.reactor.options['request_timeout'])
 
         self.history_size = options.get('history_size', self.reactor.options['history_size'])
-        self.history_size = parse_interval(self.history_size)
-        self.history_size = int(math.ceil(self.history_size / interval))
+        try:
+            self.history_size = parse_interval(self.history_size)
+            self.history_size = int(math.ceil(self.history_size / interval))
+        except ValueError:
+            raise InvalidAlertConfigError("%s: Alert's history_size is invalid" % name)
 
         if self.reactor.options.get('debug'):
             self.callback = ioloop.PeriodicCallback(self.load, 5000)

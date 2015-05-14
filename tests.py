@@ -1,5 +1,6 @@
 """ TODO: Implement the tests. """
 
+import copy
 import logging
 import pytest
 import mock
@@ -72,6 +73,69 @@ def test_reactor_errors_on_bad_config():
         detected_bad_config = True
 
     assert detected_bad_config
+
+
+def test_alert_configurations_fail_loudly_and_helpfully():
+    from graphite_beacon.alerts import BaseAlert, InvalidAlertConfigError
+    from graphite_beacon.core import Reactor
+    rr = Reactor(config=None)
+
+    good_config_opts = dict(
+        name='alert',
+        rules=['warning: > 5', 'critical: > 10'],
+        query='constantLine(0)',
+        interval='1minute',
+        time_window='60minute',
+        history_size='1day',
+    )
+
+    alert = BaseAlert(rr, **good_config_opts)
+
+    # Case: null/empty name
+    empty_name_opts = copy.copy(good_config_opts)
+    del empty_name_opts['name']
+
+    # Case: null/empty rules
+    empty_rules_opts = copy.copy(good_config_opts)
+    empty_rules_opts['rules'] = []
+
+    # Case: invalid rule
+    invalid_rule_opts = copy.copy(good_config_opts)
+    invalid_rule_opts['rules'] = ['invalid']
+
+    # Case: null/empty query
+    empty_query_opts = copy.copy(good_config_opts)
+    empty_query_opts['query'] = ''
+
+    # Case: invalid interval
+    invalid_interval_opts = copy.copy(good_config_opts)
+    invalid_interval_opts['interval'] = 'invalid'
+
+    # Case: invalid time_window
+    invalid_time_window_opts = copy.copy(good_config_opts)
+    invalid_time_window_opts['time_window'] = 'invalid'
+
+    # Case: invalid history_size
+    invalid_history_size_opts = copy.copy(good_config_opts)
+    invalid_history_size_opts['history_size'] = 'invalid'
+
+    # TODO: request_timeout
+    # TODO: any other options?
+
+    for invalid_opts in [empty_name_opts,
+                         empty_rules_opts,
+                         invalid_rule_opts,
+                         empty_query_opts,
+                         invalid_interval_opts,
+                         invalid_time_window_opts,
+                         invalid_history_size_opts]:
+        try:
+            alert = BaseAlert(rr, **invalid_opts)
+        except InvalidAlertConfigError:
+            continue
+
+        assert False, "Invalid options"
+
 
 
 def test_convert_config_log_level():
@@ -188,8 +252,13 @@ def test_multimetrics(reactor):
 
 
 def test_invalid_handler(reactor):
-    reactor.reinit(critical_handlers=['log', 'unknown'])
-    assert len(reactor.handlers['critical']) == 1
+    detected_invalid_handler = False
+    try:
+        reactor.reinit(critical_handlers=['log', 'unknown'])
+    except KeyError as e:
+        detected_invalid_handler = True
+
+    assert detected_invalid_handler
 
 
 def test_convert():
